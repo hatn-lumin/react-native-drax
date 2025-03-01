@@ -1,60 +1,56 @@
-import React, { PropsWithChildren } from 'react';
+import React, { memo, ReactNode } from 'react';
 import { StyleSheet } from 'react-native';
-import Reanimated, { SharedValue, useAnimatedRef } from 'react-native-reanimated';
+import Reanimated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 
-import { useDraxContext } from './hooks';
-import { useContent } from './hooks/useContent';
-import { TReanimatedHoverViewProps, DraxViewDragStatus, Position } from './types';
+import { DraxInternalRenderHoverViewProps, DraxViewProps } from './types';
 
-export const HoverView = ({
-    children,
-    hoverPosition,
-    renderHoverContent,
-    renderContent,
-    scrollPosition,
-    ...props
-}: Omit<PropsWithChildren<TReanimatedHoverViewProps>, 'internalProps'> & {
-    id: string;
-    hoverPosition: SharedValue<Position>;
-    scrollPositionOffset?: Position;
-}) => {
-    const { updateHoverViewMeasurements } = useDraxContext();
-    const { combinedStyle, animatedHoverStyle, renderedChildren, dragStatus } = useContent({
-        draxViewProps: {
-            children,
-            hoverPosition,
-            renderHoverContent,
-            renderContent,
-            scrollPosition,
-            ...props,
-        },
-    });
+export const HoverView = memo(
+    ({
+        internalProps,
+        ...props
+    }: { internalProps: DraxInternalRenderHoverViewProps } & Partial<DraxViewProps>): ReactNode => {
+        const { key, hoverPosition, viewState, trackingStatus, dimensions, scrollPosition } = internalProps;
 
-    const viewRef = useAnimatedRef<Reanimated.View>();
+        // Create animated style that runs entirely on the UI thread
+        const animatedStyle = useAnimatedStyle(() => {
+            const position = hoverPosition.value;
 
-    if (!(props.draggable && !props.noHover)) {
-        return null;
+            // Use scroll position offset if available
+            const scrollOffset = scrollPosition
+                ? {
+                      x: scrollPosition.value.x,
+                      y: scrollPosition.value.y,
+                  }
+                : { x: 0, y: 0 };
+
+            return {
+                position: 'absolute',
+                left: position.x - scrollOffset.x,
+                top: position.y - scrollOffset.y,
+                width: dimensions.width,
+                height: dimensions.height,
+                opacity: withTiming(1, { duration: 150 }), // Smooth fade-in
+            };
+        }, []);
+
+        return (
+            <Reanimated.View key={key} style={[styles.hoverView, animatedStyle]} collapsable={false}>
+                {props.renderContent
+                    ? props.renderContent({
+                          viewState,
+                          trackingStatus,
+                          hover: true,
+                          children: props.children,
+                          dimensions,
+                      })
+                    : props.children}
+            </Reanimated.View>
+        );
     }
+);
 
-    if (dragStatus === DraxViewDragStatus.Inactive || typeof dragStatus === 'undefined') {
-        return null;
-    }
-
-    return (
-        <Reanimated.View
-            {...props}
-            ref={viewRef}
-            onLayout={measurements => {
-                !props?.disableHoverViewMeasurementsOnLayout &&
-                    updateHoverViewMeasurements({
-                        id: props.id,
-                        measurements: { ...measurements.nativeEvent.layout },
-                    });
-            }}
-            style={[StyleSheet.absoluteFill, combinedStyle, animatedHoverStyle]}
-            pointerEvents="none"
-        >
-            {renderedChildren}
-        </Reanimated.View>
-    );
-};
+const styles = StyleSheet.create({
+    hoverView: {
+        position: 'absolute',
+    },
+});

@@ -98,6 +98,18 @@ const DraxListUnforwarded = <T extends unknown>(
     // Maintain the index the item is currently dragged to.
     const draggedToIndex = useRef<number | undefined>(undefined);
 
+    // Optimize performance by memoizing expensive calculations
+    const memoizedItemMeasurements = useRef<{[key: string]: DraxViewMeasurements}>({});
+
+    // Cache for shift calculations to prevent unnecessary recalculations
+    const shiftCalculationCache = useRef<{[key: string]: number[]}>({});
+    
+    // Clear cache when item count changes
+    useEffect(() => {
+        memoizedItemMeasurements.current = {};
+        shiftCalculationCache.current = {};
+    }, [itemCount]);
+
     // Adjust measurements, registrations, and shift value arrays as item count changes.
     useEffect(() => {
         const itemMeasurements = itemMeasurementsRef.current;
@@ -134,6 +146,9 @@ const DraxListUnforwarded = <T extends unknown>(
     useLayoutEffect(() => {
         // console.log('clear reorders');
         setOriginalIndexes(data ? [...Array(data.length).keys()] : []);
+        // Also clear caches
+        memoizedItemMeasurements.current = {};
+        shiftCalculationCache.current = {};
     }, [data]);
 
     // Handle auto-scrolling on interval.
@@ -629,6 +644,51 @@ const DraxListUnforwarded = <T extends unknown>(
         draggedIndex => {
             monitoringExternalDragStyle && runOnJS(throttledSetIsExternalDrag)(draggedIndex === itemCount);
         }
+    );
+
+    // Determine appropriate shifts based on drag position.
+    const determineShifts = useCallback(
+        throttle((dragIndex: number, dragToIndex: number) => {
+            const cacheKey = `${dragIndex}-${dragToIndex}`;
+            
+            // Check if we already calculated this shift pattern
+            if (shiftCalculationCache.current[cacheKey]) {
+                shiftsRef.value = [...shiftCalculationCache.current[cacheKey]];
+                return;
+            }
+            
+            const shifts = [...shiftsRef.value];
+            
+            // Reset shifts.
+            for (let i = 0; i < shifts.length; i += 1) {
+                shifts[i] = 0;
+            }
+            
+            if (dragToIndex !== undefined && dragIndex !== undefined && dragToIndex !== dragIndex) {
+                const dragItemMeasurements = itemMeasurementsRef.current[dragIndex];
+                if (dragItemMeasurements) {
+                    const dragSize = horizontal ? dragItemMeasurements.width : dragItemMeasurements.height;
+                    
+                    if (dragToIndex < dragIndex) {
+                        // Dragging upward/leftward
+                        for (let i = dragToIndex; i < dragIndex; i += 1) {
+                            shifts[i] = dragSize;
+                        }
+                    } else {
+                        // Dragging downward/rightward
+                        for (let i = dragIndex + 1; i <= dragToIndex; i += 1) {
+                            shifts[i] = -dragSize;
+                        }
+                    }
+                }
+            }
+            
+            // Cache this shift pattern for future use
+            shiftCalculationCache.current[cacheKey] = [...shifts];
+            
+            shiftsRef.value = shifts;
+        }, 50),  // Increase throttle to 50ms for better performance
+        [horizontal, shiftsRef]
     );
 
     return (

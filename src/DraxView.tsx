@@ -1,4 +1,4 @@
-import React, { memo, ReactNode, useEffect } from 'react';
+import React, { memo, ReactNode, useEffect, useCallback } from 'react';
 import Reanimated, { useSharedValue } from 'react-native-reanimated';
 
 import { PanGestureDetector } from './PanGestureDetector';
@@ -9,6 +9,7 @@ import { useMeasurements } from './hooks/useMeasurements';
 import { generateRandomId } from './math';
 import { defaultLongPressDelay } from './params';
 import { DraxViewProps, Position } from './types';
+import { useOptimizedMeasurements } from './useMeasurements';
 
 export const DraxView = memo((props: DraxViewProps): ReactNode => {
     // Coalesce protocol props into capabilities.
@@ -68,20 +69,22 @@ export const DraxReanimatedView = memo((props: IReanimatedView): ReactNode => {
     const hoverPosition = useSharedValue<Position>({ x: 0, y: 0 });
     const updateViewProtocol = useDraxProtocol(props, hoverPosition);
 
-    const { registerView, unregisterView } = useDraxContext();
-    const { onLayout, viewRef } = useMeasurements(props);
+    const { registerView, unregisterView, updateViewMeasurements } = useDraxContext();
+    
+    // Use the optimized measurements hook for better performance
+    const { viewRef, onLayout, measure } = useOptimizedMeasurements(
+        useCallback((measurements) => {
+            updateViewMeasurements({ id: props.id, measurements });
+            props.onMeasure?.(measurements);
+        }, [props.id, props.onMeasure, updateViewMeasurements]),
+        // Use more aggressive throttling for Android
+        50
+    );
 
     const { combinedStyle, renderedChildren } = useContent({
         draxViewProps: { ...props, hoverPosition },
         viewRef,
     });
-
-    // useEffect(() => {
-    // 	/** @todo 🪲BUG:
-    // 	 * For some reason, the Staging zone from the ColorDragDrop example loses its measurements,
-    // 	 * and we need to force refresh on them */
-    // 	measureWithHandler?.();
-    // }, [combinedStyle]);
 
     useEffect(() => {
         /** @todo 🪲BUG:

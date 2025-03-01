@@ -12,7 +12,7 @@ import { runOnJS, useAnimatedReaction, useSharedValue } from 'react-native-reani
 import { DraxContext } from './DraxContext';
 import { HoverView } from './HoverView';
 import { useDraxRegistry, useDraxState } from './hooks';
-import { getRelativePosition } from './math';
+import { extractDimensions, getRelativePosition } from './math';
 import {
     DraxContextValue,
     DraxDragEndEventData,
@@ -67,219 +67,216 @@ export const DraxProvider = ({ debug = false, style = styles.provider, children 
     const parentPosition = useSharedValue<Position>({ x: 0, y: 0 });
 
     const checkForReceiver = useCallback(
-        (dragPositionData: TDragPositionData) => {
-            // Find which monitors and receiver this drag is over.
-            const dragged = getTrackingDragged();
-            if (dragged && dragPositionData) {
-                const { dragAbsolutePosition, dragTranslationRatio, dragTranslation } = dragPositionData;
+        throttle(
+            (dragPositionData: TDragPositionData) => {
+                // Find which monitors and receiver this drag is over.
+                const dragged = getTrackingDragged();
+                if (dragged && dragPositionData) {
+                    const { dragAbsolutePosition, dragTranslationRatio, dragTranslation } = dragPositionData;
 
-                const { monitors, receiver } = findMonitorsAndReceiver(dragAbsolutePosition, dragged.id);
+                    const { monitors, receiver } = findMonitorsAndReceiver(dragAbsolutePosition, dragged.id);
 
-                // Get the previous receiver, if any.
-                const oldReceiver = getTrackingReceiver();
+                    // Get the previous receiver, if any.
+                    const oldReceiver = getTrackingReceiver();
 
-                /*
-                 * Consider the following cases for new and old receiver ids:
-                 * Case 1: new exists, old exists, new is the same as old
-                 * Case 2: new exists, old exists, new is different from old
-                 * Case 3: new exists, old does not exist
-                 * Case 4: new does not exist, old exists
-                 * Case 5: new does not exist, old does not exist
-                 */
+                    /*
+                     * Consider the following cases for new and old receiver ids:
+                     * Case 1: new exists, old exists, new is the same as old
+                     * Case 2: new exists, old exists, new is different from old
+                     * Case 3: new exists, old does not exist
+                     * Case 4: new does not exist, old exists
+                     * Case 5: new does not exist, old does not exist
+                     */
 
-                const draggedProtocol = dragged.data.protocol;
+                    const draggedProtocol = dragged.data.protocol;
 
-                // Prepare event data for dragged view.
-                const eventDataDragged: DraxEventDraggedViewData = {
-                    dragTranslationRatio,
-                    id: dragged.id,
-                    parentId: dragged.data.parentId,
-                    payload: dragged.data.protocol.dragPayload,
-                    dragOffset: dragged.tracking.dragOffset,
-                    grabOffset: dragged.tracking.grabOffset,
-                    grabOffsetRatio: dragged.tracking.grabOffsetRatio,
-                    hoverPosition: dragged.tracking.hoverPosition.value,
-                    data: dragged.data,
-                };
-
-                // Prepare base drag event data.
-                const dragEventData: DraxDragEventData = {
-                    dragAbsolutePosition,
-                    dragTranslation,
-                    dragged: eventDataDragged,
-                };
-
-                // Prepare event data stub for monitor updates later so we can optionally add receiver.
-                const monitorEventDataStub: Omit<DraxMonitorEventData, 'monitorOffset' | 'monitorOffsetRatio'> = {
-                    ...dragEventData,
-                };
-
-                if (receiver) {
-                    // New receiver exists.
-                    const receiverProtocol = receiver.data.protocol;
-
-                    // Update the receiver.
-                    const trackingReceiver = updateReceiver(receiver, dragged);
-
-                    if (trackingReceiver === undefined) {
-                        // This should never happen, but just in case.
-                        // if (debug) {
-                        // 	console.log('Failed to update tracking receiver');
-                        // }
-                        return;
-                    }
-
-                    // Prepare event data for receiver view.
-                    const eventDataReceiver: DraxEventReceiverViewData = {
-                        id: receiver.id,
-                        parentId: receiver.data.parentId,
-                        payload: receiver.data.protocol.receiverPayload,
-                        receiveOffset: trackingReceiver.receiveOffset,
-                        receiveOffsetRatio: trackingReceiver.receiveOffsetRatio,
-                        data: receiver.data,
+                    // Prepare event data for dragged view.
+                    const eventDataDragged: DraxEventDraggedViewData = {
+                        dragTranslationRatio,
+                        id: dragged.id,
+                        parentId: dragged.data.parentId,
+                        payload: dragged.data.protocol.dragPayload,
+                        dragOffset: dragged.tracking.dragOffset,
+                        grabOffset: dragged.tracking.grabOffset,
+                        grabOffsetRatio: dragged.tracking.grabOffsetRatio,
+                        hoverPosition: dragged.tracking.hoverPosition.value,
+                        data: dragged.data,
                     };
 
-                    // Add receiver data to monitor event stub.
-                    monitorEventDataStub.receiver = eventDataReceiver;
+                    // Prepare base drag event data.
+                    const dragEventData: DraxDragEventData = {
+                        dragAbsolutePosition,
+                        dragTranslation,
+                        dragged: eventDataDragged,
+                    };
 
-                    // Prepare event data for callbacks.
-                    const eventData: DraxDragWithReceiverEventData = {
+                    // Prepare event data stub for monitor updates later so we can optionally add receiver.
+                    const monitorEventDataStub: Omit<DraxMonitorEventData, 'monitorOffset' | 'monitorOffsetRatio'> = {
                         ...dragEventData,
-                        receiver: eventDataReceiver,
                     };
 
-                    if (oldReceiver) {
-                        if (receiver.id === oldReceiver.id) {
-                            // Case 1: new exists, old exists, new is the same as old
+                    if (receiver) {
+                        // New receiver exists.
+                        const receiverProtocol = receiver.data.protocol;
 
-                            // Call the protocol event callbacks for dragging over the receiver.
-                            draggedProtocol.onDragOver?.(eventData);
-                            receiverProtocol.onReceiveDragOver?.(eventData);
+                        // Update the receiver.
+                        const trackingReceiver = updateReceiver(receiver, dragged);
+
+                        if (trackingReceiver === undefined) {
+                            // This should never happen, but just in case.
+                            // if (debug) {
+                            // 	console.log('Failed to update tracking receiver');
+                            // }
+                            return;
+                        }
+
+                        // Prepare event data for receiver view.
+                        const eventDataReceiver: DraxEventReceiverViewData = {
+                            id: receiver.id,
+                            parentId: receiver.data.parentId,
+                            payload: receiver.data.protocol.receiverPayload,
+                            receiveOffset: trackingReceiver.receiveOffset,
+                            receiveOffsetRatio: trackingReceiver.receiveOffsetRatio,
+                            data: receiver.data,
+                        };
+
+                        // Add receiver data to monitor event stub.
+                        monitorEventDataStub.receiver = eventDataReceiver;
+
+                        // Prepare event data for callbacks.
+                        const eventData: DraxDragWithReceiverEventData = {
+                            ...dragEventData,
+                            receiver: eventDataReceiver,
+                        };
+
+                        if (oldReceiver) {
+                            if (receiver.id === oldReceiver.id) {
+                                // Case 1: new exists, old exists, new is the same as old
+
+                                // Call the protocol event callbacks for dragging over the receiver.
+                                draggedProtocol.onDragOver?.(eventData);
+                                receiverProtocol.onReceiveDragOver?.(eventData);
+                            } else {
+                                // Case 2: new exists, old exists, new is different from old
+
+                                // Prepare event data with old receiver.
+                                const eventDataOldReceiver: DraxDragWithReceiverEventData = {
+                                    ...dragEventData,
+                                    receiver: {
+                                        id: oldReceiver.id,
+                                        parentId: oldReceiver.data.parentId,
+                                        payload: oldReceiver.data.protocol.receiverPayload,
+                                        receiveOffset: oldReceiver.tracking.receiveOffset,
+                                        receiveOffsetRatio: oldReceiver.tracking.receiveOffsetRatio,
+                                        data: oldReceiver.data,
+                                    },
+                                };
+
+                                // Call the protocol event callbacks for exiting the old receiver...
+                                draggedProtocol.onDragExit?.(eventDataOldReceiver);
+
+                                const endEventDataOldReceiver: DraxDragWithReceiverEndEventData = {
+                                    ...eventDataOldReceiver,
+                                    cancelled: false,
+                                };
+
+                                oldReceiver.data.protocol.onReceiveDragExit?.(endEventDataOldReceiver);
+
+                                // ...and entering the new receiver.
+                                draggedProtocol.onDragEnter?.(eventData);
+                                receiverProtocol.onReceiveDragEnter?.(eventData);
+                            }
                         } else {
-                            // Case 2: new exists, old exists, new is different from old
+                            // Case 3: new exists, old does not exist
 
-                            // Prepare event data with old receiver.
-                            const eventDataOldReceiver: DraxDragWithReceiverEventData = {
-                                ...dragEventData,
-                                receiver: {
-                                    id: oldReceiver.id,
-                                    parentId: oldReceiver.data.parentId,
-                                    payload: oldReceiver.data.protocol.receiverPayload,
-                                    receiveOffset: oldReceiver.tracking.receiveOffset,
-                                    receiveOffsetRatio: oldReceiver.tracking.receiveOffsetRatio,
-                                    data: oldReceiver.data,
-                                },
-                            };
-
-                            // Call the protocol event callbacks for exiting the old receiver...
-                            draggedProtocol.onDragExit?.(eventDataOldReceiver);
-
-                            const endEventDataOldReceiver: DraxDragWithReceiverEndEventData = {
-                                ...eventDataOldReceiver,
-                                cancelled: false,
-                            };
-
-                            oldReceiver.data.protocol.onReceiveDragExit?.(endEventDataOldReceiver);
-
-                            // ...and entering the new receiver.
+                            // Call the protocol event callbacks for entering the new receiver.
                             draggedProtocol.onDragEnter?.(eventData);
                             receiverProtocol.onReceiveDragEnter?.(eventData);
                         }
+                    } else if (oldReceiver) {
+                        // Case 4: new does not exist, old exists
+
+                        // Reset the old receiver.
+                        resetReceiver();
+
+                        // Prepare event data with old receiver.
+                        const eventData: DraxDragWithReceiverEventData = {
+                            ...dragEventData,
+                            receiver: {
+                                id: oldReceiver.id,
+                                parentId: oldReceiver.data.parentId,
+                                payload: oldReceiver.data.protocol.receiverPayload,
+                                receiveOffset: oldReceiver.tracking.receiveOffset,
+                                receiveOffsetRatio: oldReceiver.tracking.receiveOffsetRatio,
+                                data: oldReceiver.data,
+                            },
+                        };
+
+                        // Call the protocol event callbacks for exiting the old receiver.
+                        draggedProtocol.onDragExit?.(eventData);
+
+                        const receiveEventData: DraxDragWithReceiverEndEventData = {
+                            ...eventData,
+                            cancelled: false,
+                        };
+                        oldReceiver.data.protocol.onReceiveDragExit?.(receiveEventData);
                     } else {
-                        // Case 3: new exists, old does not exist
+                        // Case 5: new does not exist, old does not exist
 
-                        // Call the protocol event callbacks for entering the new receiver.
-                        draggedProtocol.onDragEnter?.(eventData);
-                        receiverProtocol.onReceiveDragEnter?.(eventData);
+                        // Call the protocol event callback for dragging.
+                        draggedProtocol.onDrag?.(dragEventData);
                     }
-                } else if (oldReceiver) {
-                    // Case 4: new does not exist, old exists
 
-                    // Reset the old receiver.
-                    resetReceiver();
-
-                    // Prepare event data with old receiver.
-                    const eventData: DraxDragWithReceiverEventData = {
-                        ...dragEventData,
-                        receiver: {
-                            id: oldReceiver.id,
-                            parentId: oldReceiver.data.parentId,
-                            payload: oldReceiver.data.protocol.receiverPayload,
-                            receiveOffset: oldReceiver.tracking.receiveOffset,
-                            receiveOffsetRatio: oldReceiver.tracking.receiveOffsetRatio,
-                            data: oldReceiver.data,
-                        },
-                    };
-
-                    // Call the protocol event callbacks for exiting the old receiver.
-                    draggedProtocol.onDragExit?.(eventData);
-
-                    const receiveEventData: DraxDragWithReceiverEndEventData = {
-                        ...eventData,
-                        cancelled: false,
-                    };
-                    oldReceiver.data.protocol.onReceiveDragExit?.(receiveEventData);
-                } else {
-                    // Case 5: new does not exist, old does not exist
-
-                    // Call the protocol event callback for dragging.
-                    draggedProtocol.onDrag?.(dragEventData);
-                }
-
-                // Notify monitors and update monitor tracking, if necessary.
-                const prevMonitorIds = getTrackingMonitorIds();
-                if (monitors.length > 0 || prevMonitorIds.length > 0) {
-                    const newMonitorIds = monitors.map(
-                        ({
-                            id: monitorId,
-                            data: monitorData,
-                            relativePosition: monitorOffset,
-                            relativePositionRatio: monitorOffsetRatio,
-                        }) => {
-                            const monitorEventData: DraxMonitorEventData = {
-                                ...monitorEventDataStub,
-                                monitorOffset,
-                                monitorOffsetRatio,
-                            };
-                            if (prevMonitorIds.includes(monitorId)) {
-                                // Drag was already over this monitor.
-                                monitorData.protocol.onMonitorDragOver?.(monitorEventData);
-                            } else {
-                                // Drag is entering monitor.
-                                monitorData.protocol.onMonitorDragEnter?.(monitorEventData);
-                            }
-                            return monitorId;
-                        }
-                    );
-                    prevMonitorIds
-                        .filter(monitorId => !newMonitorIds.includes(monitorId))
-                        .forEach(monitorId => {
-                            // Drag has exited monitor.
-                            const monitorData = getAbsoluteViewData(monitorId);
-                            if (monitorData) {
-                                const { relativePosition: monitorOffset, relativePositionRatio: monitorOffsetRatio } =
-                                    getRelativePosition(dragAbsolutePosition, monitorData.absoluteMeasurements);
-                                monitorData.protocol.onMonitorDragExit?.({
+                    // Notify monitors and update monitor tracking, if necessary.
+                    const prevMonitorIds = getTrackingMonitorIds();
+                    if (monitors.length > 0 || prevMonitorIds.length > 0) {
+                        const newMonitorIds = monitors.map(
+                            ({
+                                id: monitorId,
+                                data: monitorData,
+                                relativePosition: monitorOffset,
+                                relativePositionRatio: monitorOffsetRatio,
+                            }) => {
+                                const monitorEventData: DraxMonitorEventData = {
                                     ...monitorEventDataStub,
                                     monitorOffset,
                                     monitorOffsetRatio,
-                                });
+                                };
+                                if (prevMonitorIds.includes(monitorId)) {
+                                    // Drag was already over this monitor.
+                                    monitorData.protocol.onMonitorDragOver?.(monitorEventData);
+                                } else {
+                                    // Drag is entering monitor.
+                                    monitorData.protocol.onMonitorDragEnter?.(monitorEventData);
+                                }
+                                return monitorId;
                             }
-                        });
-                    setMonitorIds(newMonitorIds);
+                        );
+                        prevMonitorIds
+                            .filter(monitorId => !newMonitorIds.includes(monitorId))
+                            .forEach(monitorId => {
+                                // Drag has exited monitor.
+                                const monitorData = getAbsoluteViewData(monitorId);
+                                if (monitorData) {
+                                    const {
+                                        relativePosition: monitorOffset,
+                                        relativePositionRatio: monitorOffsetRatio,
+                                    } = getRelativePosition(dragAbsolutePosition, monitorData.absoluteMeasurements);
+                                    monitorData.protocol.onMonitorDragExit?.({
+                                        ...monitorEventDataStub,
+                                        monitorOffset,
+                                        monitorOffsetRatio,
+                                    });
+                                }
+                            });
+                        setMonitorIds(newMonitorIds);
+                    }
                 }
-            }
-        },
-        [
-            findMonitorsAndReceiver,
-            getAbsoluteViewData,
-            getTrackingDragged,
-            getTrackingMonitorIds,
-            getTrackingReceiver,
-            resetReceiver,
-            setMonitorIds,
-            updateReceiver,
-        ]
+            },
+            50, // Increase throttle delay from default 16ms to 50ms for better performance
+            { leading: true, trailing: true }
+        ),
+        [findMonitorsAndReceiver, getTrackingDragged, getTrackingReceiver, resetReceiver, setMonitorIds, updateReceiver]
     );
 
     const updateDragAbsolutePosition = useCallback(
@@ -858,7 +855,13 @@ export const DraxProvider = ({ debug = false, style = styles.provider, children 
                             {...(viewData?.protocol || {})}
                             id={viewData.id}
                             scrollPosition={viewData?.scrollPosition}
-                            scrollPositionOffset={viewData?.scrollPositionOffset}
+                            internalProps={{
+                                key: viewData.id,
+                                hoverPosition: viewData.protocol.hoverPosition,
+                                viewState: getViewState(viewData.id)!,
+                                trackingStatus: getTrackingStatus(),
+                                dimensions: extractDimensions(viewData.measurements!),
+                            }}
                         />
                     )
             ),

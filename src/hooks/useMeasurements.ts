@@ -1,12 +1,13 @@
 import { useCallback, useMemo, useEffect, useRef } from 'react';
-import { Dimensions, Platform } from 'react-native';
-import Reanimated, { useAnimatedRef } from 'react-native-reanimated';
+import { Dimensions, Platform, LayoutChangeEvent, MeasureOnSuccessCallback, View } from 'react-native';
+import Reanimated, { useAnimatedRef, AnimatedRef } from 'react-native-reanimated';
 
 import { useDraxContext } from './useDraxContext';
 import { DraxViewProps, DraxViewMeasurements, DraxViewMeasurementHandler } from '../types';
+import { extractDimensions } from '../math';
 
 export const useMeasurements = ({
-    onMeasure,
+    onMeasure: propsOnMeasure,
     registration,
     id,
     parent: parentProp,
@@ -79,10 +80,10 @@ export const useMeasurements = ({
                           };
                 measurementsRef.current = measurements;
                 updateViewMeasurements({ id, measurements });
-                onMeasure?.(measurements);
+                propsOnMeasure?.(measurements);
                 measurementHandler?.(measurements);
             },
-        [updateViewMeasurements, id, onMeasure]
+        [updateViewMeasurements, id, propsOnMeasure]
     );
 
     // Callback which will report our measurements to Drax context and onMeasure.
